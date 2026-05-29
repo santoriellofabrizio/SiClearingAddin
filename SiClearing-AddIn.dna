@@ -29,6 +29,14 @@
                       onAction="OnDebugFolders"
                       screentip="Mostra struttura cartelle Outlook"/>
             </group>
+            <group id="grpLog" label="Diagnostica">
+              <button id="btnLog"
+                      label="Log"
+                      imageMso="ControlLayoutRemoveColumns"
+                      size="normal"
+                      onAction="OnOpenLog"
+                      screentip="Apre la finestra di log"/>
+            </group>
           </tab>
         </tabs>
       </ribbon>
