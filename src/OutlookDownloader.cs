@@ -92,7 +92,7 @@ namespace SiClearing
             string filter = $"[ReceivedTime] >= '{DateTime.Today:MM/dd/yyyy} 00:00 AM' " +
                             $"AND [ReceivedTime] <= '{DateTime.Today:MM/dd/yyyy} 11:59 PM'";
 
-            var items = folder.Items.Restrict(filter);
+            var items = (Outlook.Items)folder.Items.Restrict(filter);
             items.Sort("[ReceivedTime]", true);
 
             for (int i = 1; i <= items.Count; i++)
