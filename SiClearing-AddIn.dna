@@ -32,7 +32,7 @@
             <group id="grpLog" label="Diagnostica">
               <button id="btnLog"
                       label="Log"
-                      imageMso="ControlLayoutRemoveColumns"
+                      imageMso="MacroPlay"
                       size="normal"
                       onAction="OnOpenLog"
                       screentip="Apre la finestra di log"/>
