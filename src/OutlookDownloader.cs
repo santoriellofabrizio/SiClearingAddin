@@ -97,7 +97,7 @@ namespace SiClearing
 
             for (int i = 1; i <= items.Count; i++)
             {
-                var obj = items.Item((object)i);
+                var obj = items[i];
                 if (!(obj is Outlook.MailItem mail)) continue;
 
                 if (!mail.Subject.Contains(settings.SubjectFilter)) continue;
