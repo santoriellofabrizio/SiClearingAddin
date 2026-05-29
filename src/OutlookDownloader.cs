@@ -1,8 +1,8 @@
 using System;
 using System.IO;
 using System.Windows.Forms;
-using Microsoft.Office.Interop.Outlook;
 using SiClearing.Settings;
+using Outlook = Microsoft.Office.Interop.Outlook;
 
 namespace SiClearing
 {
@@ -10,12 +10,12 @@ namespace SiClearing
     {
         public string? DownloadLatestToday(SiClearingSettings settings)
         {
-            Application? outlook = null;
+            Outlook.Application? outlook = null;
             try
             {
                 try
                 {
-                    outlook = (Application)System.Runtime.InteropServices.Marshal.GetActiveObject("Outlook.Application");
+                    outlook = (Outlook.Application)System.Runtime.InteropServices.Marshal.GetActiveObject("Outlook.Application");
                 }
                 catch
                 {
@@ -37,7 +37,7 @@ namespace SiClearing
 
                 Directory.CreateDirectory(settings.SaveFolder);
 
-                foreach (Attachment att in mail.Attachments)
+                foreach (Outlook.Attachment att in mail.Attachments)
                 {
                     if (att.FileName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
                     {
@@ -52,7 +52,7 @@ namespace SiClearing
                     "SiClearing", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return null;
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
                 MessageBox.Show($"Errore durante il download:\n{ex.Message}",
                     "SiClearing", MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -60,19 +60,19 @@ namespace SiClearing
             }
         }
 
-        private MAPIFolder ResolveFolder(NameSpace ns, string folderPath)
+        private Outlook.MAPIFolder ResolveFolder(Outlook.NameSpace ns, string folderPath)
         {
-            var inbox = ns.GetDefaultFolder(OlDefaultFolders.olFolderInbox);
+            var inbox = ns.GetDefaultFolder(Outlook.OlDefaultFolders.olFolderInbox);
 
             if (string.IsNullOrWhiteSpace(folderPath))
                 return inbox;
 
             var parts = folderPath.Split('\\');
-            MAPIFolder current = inbox;
+            Outlook.MAPIFolder current = inbox;
             foreach (var part in parts)
             {
                 bool found = false;
-                foreach (MAPIFolder sub in current.Folders)
+                foreach (Outlook.MAPIFolder sub in current.Folders)
                 {
                     if (sub.Name.Equals(part, StringComparison.OrdinalIgnoreCase))
                     {
@@ -82,12 +82,12 @@ namespace SiClearing
                     }
                 }
                 if (!found)
-                    throw new System.Exception($"Cartella Outlook non trovata: '{part}' in '{current.Name}'");
+                    throw new Exception($"Cartella Outlook non trovata: '{part}' in '{current.Name}'");
             }
             return current;
         }
 
-        private MailItem? SearchFolderRestrict(MAPIFolder folder, SiClearingSettings settings)
+        private Outlook.MailItem? SearchFolderRestrict(Outlook.MAPIFolder folder, SiClearingSettings settings)
         {
             string filter = $"[ReceivedTime] >= '{DateTime.Today:MM/dd/yyyy} 00:00 AM' " +
                             $"AND [ReceivedTime] <= '{DateTime.Today:MM/dd/yyyy} 11:59 PM'";
@@ -95,12 +95,10 @@ namespace SiClearing
             var items = folder.Items.Restrict(filter);
             items.Sort("[ReceivedTime]", true);
 
-            MailItem? best = null;
-
             for (int i = 1; i <= items.Count; i++)
             {
-                var obj = items.Item(i);
-                if (!(obj is MailItem mail)) continue;
+                var obj = items.Item((object)i);
+                if (!(obj is Outlook.MailItem mail)) continue;
 
                 if (!mail.Subject.Contains(settings.SubjectFilter)) continue;
 
@@ -108,25 +106,24 @@ namespace SiClearing
                     !mail.SenderEmailAddress.Contains(settings.SenderFilter))
                     continue;
 
-                best = mail;
-                break; // items are sorted descending by ReceivedTime
+                return mail;
             }
 
-            return best;
+            return null;
         }
 
-        public void DebugFolders(NameSpace ns, Microsoft.Office.Interop.Excel.Worksheet sheet)
+        public void DebugFolders(Outlook.NameSpace ns, Microsoft.Office.Interop.Excel.Worksheet sheet)
         {
             int row = 1;
-            WriteFolder(ns.GetDefaultFolder(OlDefaultFolders.olFolderInbox), sheet, ref row, 0);
+            WriteFolder(ns.GetDefaultFolder(Outlook.OlDefaultFolders.olFolderInbox), sheet, ref row, 0);
         }
 
-        private void WriteFolder(MAPIFolder folder, Microsoft.Office.Interop.Excel.Worksheet sheet,
+        private void WriteFolder(Outlook.MAPIFolder folder, Microsoft.Office.Interop.Excel.Worksheet sheet,
             ref int row, int depth)
         {
             sheet.Cells[row, 1] = new string(' ', depth * 2) + folder.Name;
             row++;
-            foreach (MAPIFolder sub in folder.Folders)
+            foreach (Outlook.MAPIFolder sub in folder.Folders)
                 WriteFolder(sub, sheet, ref row, depth + 1);
         }
     }

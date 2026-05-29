@@ -1,9 +1,8 @@
 using System;
-using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using ExcelDna.Integration.CustomUI;
-using Microsoft.Office.Interop.Outlook;
+using Outlook = Microsoft.Office.Interop.Outlook;
 
 namespace SiClearing
 {
@@ -33,7 +32,7 @@ namespace SiClearing
                     ExcelDna.Integration.XlCall.Excel(ExcelDna.Integration.XlCall.xlcCalculateNow);
                 }
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
                 MessageBox.Show($"Errore durante Refresh:\n{ex.Message}",
                     "SiClearing", MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -51,10 +50,10 @@ namespace SiClearing
         {
             try
             {
-                Application? outlook;
+                Outlook.Application? outlook;
                 try
                 {
-                    outlook = (Application)System.Runtime.InteropServices.Marshal.GetActiveObject("Outlook.Application");
+                    outlook = (Outlook.Application)Marshal.GetActiveObject("Outlook.Application");
                 }
                 catch
                 {
@@ -74,7 +73,7 @@ namespace SiClearing
                 MessageBox.Show("Struttura cartelle Outlook scritta nel foglio 'OutlookFolders'.",
                     "SiClearing", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
                 MessageBox.Show($"Errore debug cartelle:\n{ex.Message}",
                     "SiClearing", MessageBoxButtons.OK, MessageBoxIcon.Error);

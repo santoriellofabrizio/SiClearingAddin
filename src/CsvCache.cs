@@ -82,7 +82,7 @@ namespace SiClearing
                 return new string[0, 0];
 
             // detect separator
-            char sep = lines[0].Contains(';') ? ';' : ',';
+            char sep = lines[0].Contains(";") ? ';' : ',';
 
             var rows = new System.Collections.Generic.List<string[]>();
             foreach (var line in lines)
@@ -111,7 +111,7 @@ namespace SiClearing
         public static double ParseItalianNumber(string s)
         {
             s = s.Trim().Replace(" ", "");
-            if (s.Contains(','))
+            if (s.Contains(","))
                 return double.Parse(s.Replace(".", "").Replace(",", "."), CultureInfo.InvariantCulture);
 
             int dotIdx = s.LastIndexOf('.');
