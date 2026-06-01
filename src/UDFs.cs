@@ -167,15 +167,14 @@ namespace SiClearing
             return BuildResult(data, rows, colIdxs);
         }
 
-        [ExcelFunction(Name = "SiClearingBuyInSaldi",
-            Description = "GroupBy ISIN delle quantità per una Buy-In Alert Date, con filtri su Tipo Conto, Controparte, Mercato e ISIN.")]
-        public static object SiClearingBuyInSaldi(
-            [ExcelArgument(Name = "alertDate",   Description = "Data Buy-In Alert (seriale Excel o dd/mm/yyyy)")] object alertDate,
-            [ExcelArgument(Name = "saldiLive",   Description = "Range 2 colonne {ISIN, qty} con saldi live (opzionale)")] object? saldiLive = null,
-            [ExcelArgument(Name = "tipoConto",   Description = "Filtro Tipo Conto: stringa o range (opzionale)")] object? tipoConto = null,
-            [ExcelArgument(Name = "controparte", Description = "Filtro Controparte: stringa o range (opzionale)")] object? controparte = null,
-            [ExcelArgument(Name = "mercato",     Description = "Filtro Mercato: stringa o range (opzionale)")] object? mercato = null,
-            [ExcelArgument(Name = "isin",        Description = "Filtro ISIN: stringa o range (opzionale)")] object? isin = null)
+        [ExcelFunction(Name = "SiClearingSumUp", IsVolatile = true,
+            Description = "Greedy settlement: quanti scoperti si chiudono e quante shares mancano.")]
+        public static object SiClearingSumUp(
+            [ExcelArgument(Name = "alertDate", Description = "Data buy-in alert (seriale Excel o dd/MM/yyyy)")] object alertDate,
+            [ExcelArgument(Name = "markets",   Description = "Market ID o range verticale per Duma")] object markets,
+            [ExcelArgument(Name = "tipoConto", Description = "Filtro Tipo Conto (opzionale)")] object? tipoConto = null,
+            [ExcelArgument(Name = "mercato",   Description = "Filtro colonna Mercato CSV (opzionale)")] object? mercato = null,
+            [ExcelArgument(Name = "isin",      Description = "Filtro ISIN (opzionale)")] object? isin = null)
         {
             var data = AddIn.Cache.GetOrLoad(AddIn.Settings.SaveFolder);
             if (data == null || data.GetLength(0) == 0)
@@ -188,25 +187,24 @@ namespace SiClearing
             int buyInCol = ResolveFirst(data, "Buy-In Alert");
             int segnoCol = ResolveFirst(data, "Segno");
             int qtaCol   = ResolveFirst(data, "Quantita'");
+            int contrCol = ResolveFirst(data, "Descrizione Controparte", "Controparte");
             int tipoCol  = ResolveFirst(data, "Tipo Conto");
-            int contrCol = ResolveFirst(data, "Controparte");
+            int mercatoCol = ResolveFirst(data, "Mercato");
 
             if (isinCol < 0 || buyInCol < 0 || segnoCol < 0 || qtaCol < 0)
             {
-                Logger.Log("SiClearingBuyInSaldi: colonne obbligatorie non trovate nel CSV.");
+                Logger.Log("SiClearingSumUp: colonne obbligatorie non trovate nel CSV.");
                 return ExcelError.ExcelErrorValue;
             }
 
+            var gf = BuildGlobalFilter(data);
             var tipoFilter    = BuildFilterSet(tipoConto);
-            var contrFilter   = BuildFilterSet(controparte);
             var mercatoFilter = BuildFilterSet(mercato);
             var isinFilter    = BuildFilterSet(isin);
-            var gf = BuildGlobalFilter(data);
-            int mercatoCol = ResolveFirst(data, "Mercato");
 
+            // collect target ISINs from buy-in alert date
             var targetIsins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             int rowCount = data.GetLength(0);
-
             for (int r = 1; r < rowCount; r++)
             {
                 if (!gf.Pass(data, r)) continue;
@@ -221,67 +219,185 @@ namespace SiClearing
 
             if (targetIsins.Count == 0)
             {
-                Logger.Log($"SiClearingBuyInSaldi: nessun ISIN con Buy-In Alert {targetDate:dd/MM/yyyy}.");
+                Logger.Log($"SiClearingSumUp: nessun ISIN con Buy-In Alert {targetDate:dd/MM/yyyy}.");
                 return ExcelError.ExcelErrorNA;
             }
 
-            var saldoCsv = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+            // per ISIN: list of individual scoperto qty (Segno=D), split by CCG vs other
+            var scopertiCcg   = new Dictionary<string, List<double>>(StringComparer.OrdinalIgnoreCase);
+            var scopertiOther = new Dictionary<string, List<double>>(StringComparer.OrdinalIgnoreCase);
+            // aggregated incoming (Segno=A)
+            var incomingCcg = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+            var incomingAll = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var i in targetIsins)
+            {
+                scopertiCcg[i]   = new List<double>();
+                scopertiOther[i] = new List<double>();
+            }
 
             for (int r = 1; r < rowCount; r++)
             {
                 if (!gf.Pass(data, r)) continue;
-                string isin = data[r, isinCol].Trim();
-                if (!targetIsins.Contains(isin)) continue;
+                string isinVal = data[r, isinCol].Trim();
+                if (!targetIsins.Contains(isinVal)) continue;
 
-                if (tipoFilter != null && tipoCol >= 0 &&
-                    !tipoFilter.Contains(data[r, tipoCol].Trim()))
-                    continue;
-
-                if (contrFilter != null && contrCol >= 0 &&
-                    !contrFilter.Contains(data[r, contrCol].Trim()))
-                    continue;
-
-                if (mercatoFilter != null && mercatoCol >= 0 &&
-                    !mercatoFilter.Contains(data[r, mercatoCol].Trim()))
-                    continue;
+                if (tipoFilter != null && tipoCol >= 0 && !tipoFilter.Contains(data[r, tipoCol].Trim())) continue;
+                if (mercatoFilter != null && mercatoCol >= 0 && !mercatoFilter.Contains(data[r, mercatoCol].Trim())) continue;
 
                 string qtaRaw = data[r, qtaCol].Trim();
                 if (string.IsNullOrEmpty(qtaRaw)) continue;
-
                 double qty;
                 try { qty = CsvCache.ParseItalianNumber(qtaRaw); }
                 catch { continue; }
 
                 string segno = data[r, segnoCol].Trim().ToUpperInvariant();
-                double signed = segno == "A" ? qty : -qty;
+                bool isCcg = contrCol >= 0 && data[r, contrCol].IndexOf("CCG", StringComparison.OrdinalIgnoreCase) >= 0;
 
-                saldoCsv[isin] = saldoCsv.TryGetValue(isin, out double cur) ? cur + signed : signed;
+                if (segno == "D")
+                {
+                    if (isCcg) scopertiCcg[isinVal].Add(qty);
+                    else        scopertiOther[isinVal].Add(qty);
+                }
+                else if (segno == "A")
+                {
+                    if (!incomingAll.ContainsKey(isinVal)) incomingAll[isinVal] = 0;
+                    incomingAll[isinVal] += qty;
+                    if (isCcg)
+                    {
+                        if (!incomingCcg.ContainsKey(isinVal)) incomingCcg[isinVal] = 0;
+                        incomingCcg[isinVal] += qty;
+                    }
+                }
             }
 
-            if (saldoCsv.Count == 0)
-                return ExcelError.ExcelErrorNA;
-
-            var livemap = ParseLiveSaldi(saldiLive);
-            bool hasLive = livemap != null;
-
-            int outCols = hasLive ? 4 : 2;
-            var result = new object[saldoCsv.Count + 1, outCols];
-            result[0, 0] = "ISIN";
-            result[0, 1] = "Saldo CSV";
-            if (hasLive) { result[0, 2] = "Saldo Live"; result[0, 3] = "Saldo Totale"; }
-
-            int idx = 1;
-            foreach (var kv in saldoCsv)
+            // get Duma live net per ISIN
+            var dumaNet = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+            var xl = ExcelDnaUtil.Application as Excel.Application;
+            if (xl != null)
             {
-                double lv = (hasLive && livemap!.TryGetValue(kv.Key, out double lvv)) ? lvv : 0;
-                result[idx, 0] = kv.Key;
-                result[idx, 1] = kv.Value;
-                if (hasLive) { result[idx, 2] = lv; result[idx, 3] = kv.Value + lv; }
-                idx++;
+                var marketList = ExtractStringList(markets);
+                foreach (var market in marketList)
+                {
+                    object raw;
+                    try { raw = xl.Evaluate($"dumaGetTableRecords(\"Trade\",\"{market}\",TRUE)"); }
+                    catch (Exception ex)
+                    {
+                        Logger.Log($"[SumUp] Duma non disponibile per mercato {market} — assicurarsi che Duma sia avviato e connesso. ({ex.Message})");
+                        continue;
+                    }
+                    if (!(raw is object[,] table))
+                    {
+                        Logger.Log($"[SumUp] Duma non disponibile per mercato {market} — assicurarsi che Duma sia avviato e connesso.");
+                        continue;
+                    }
+
+                    int dr0 = table.GetLowerBound(0), dc0 = table.GetLowerBound(1);
+                    int dRows = table.GetUpperBound(0) - dr0 + 1;
+                    int dCols = table.GetUpperBound(1) - dc0 + 1;
+                    if (dRows < 2) continue;
+
+                    int colDIsin = -1, colDQty = -1, colDSide = -1;
+                    for (int c = 0; c < dCols; c++)
+                    {
+                        string hdr = table[dr0, dc0 + c]?.ToString() ?? "";
+                        if (hdr.Equals("instrument.isincode", StringComparison.OrdinalIgnoreCase)) colDIsin = c;
+                        else if (hdr.Equals("tradeqty", StringComparison.OrdinalIgnoreCase)) colDQty = c;
+                        else if (hdr.Equals("side", StringComparison.OrdinalIgnoreCase)) colDSide = c;
+                    }
+                    if (colDIsin < 0 || colDQty < 0 || colDSide < 0) continue;
+
+                    for (int r = 1; r < dRows; r++)
+                    {
+                        string isinVal = table[dr0 + r, dc0 + colDIsin]?.ToString()?.Trim() ?? "";
+                        if (!targetIsins.Contains(isinVal)) continue;
+                        string sideVal = table[dr0 + r, dc0 + colDSide]?.ToString()?.Trim() ?? "";
+                        double qty;
+                        var qRaw = table[dr0 + r, dc0 + colDQty];
+                        if (qRaw is double qd) qty = qd;
+                        else if (!double.TryParse(qRaw?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out qty)) continue;
+                        double signed = sideVal.Equals("Buy", StringComparison.OrdinalIgnoreCase) ? qty : -qty;
+                        dumaNet[isinVal] = dumaNet.TryGetValue(isinVal, out double cur) ? cur + signed : signed;
+                    }
+                }
+            }
+            else
+            {
+                Logger.Log("[SumUp] Impossibile accedere a Excel — Duma non interrogato.");
             }
 
-            Logger.Log($"SiClearingBuyInSaldi {targetDate:dd/MM/yyyy}: {saldoCsv.Count} ISIN.");
+            // build output: 1 row per ISIN, 12 columns
+            // ISIN | ScopertiN | ScopertiQty | IncomingCCG | IncomingTutteCP | DumaNet
+            // | ChiusiCCGN | ChiusiCCGQty | ResiduoCCG | ChiusiTutteN | ChiusiTutteQty | ResiduoTutte
+            var isinList = new List<string>(targetIsins);
+            isinList.Sort(StringComparer.OrdinalIgnoreCase);
+            var result = new object[isinList.Count + 1, 12];
+            result[0, 0]  = "ISIN";
+            result[0, 1]  = "Scoperti N";
+            result[0, 2]  = "Scoperti Qty";
+            result[0, 3]  = "Incoming CCG";
+            result[0, 4]  = "Incoming Tutte CP";
+            result[0, 5]  = "Duma Net";
+            result[0, 6]  = "Chiusi CCG N";
+            result[0, 7]  = "Chiusi CCG Qty";
+            result[0, 8]  = "Residuo CCG";
+            result[0, 9]  = "Chiusi Tutte N";
+            result[0, 10] = "Chiusi Tutte Qty";
+            result[0, 11] = "Residuo Tutte";
+
+            for (int i = 0; i < isinList.Count; i++)
+            {
+                string key = isinList[i];
+                var ccgList   = scopertiCcg[key];
+                var otherList = scopertiOther[key];
+                ccgList.Sort();
+                otherList.Sort();
+                int scopertiN   = ccgList.Count + otherList.Count;
+                double scopertiQ = 0;
+                foreach (var v in ccgList)   scopertiQ += v;
+                foreach (var v in otherList) scopertiQ += v;
+
+                double dNet = dumaNet.TryGetValue(key, out double dn) ? dn : 0.0;
+                incomingCcg.TryGetValue(key, out double incCcg);
+                incomingAll.TryGetValue(key, out double incAll);
+                double avCcg  = incCcg + Math.Max(0, dNet);
+                double avAll  = incAll  + Math.Max(0, dNet);
+
+                GreedyClose(ccgList, otherList, avCcg,
+                    out int chNCcg, out double chQCcg, out double resCcg);
+                GreedyClose(ccgList, otherList, avAll,
+                    out int chNAll, out double chQAll, out double resAll);
+
+                result[i + 1, 0]  = key;
+                result[i + 1, 1]  = scopertiN;
+                result[i + 1, 2]  = scopertiQ;
+                result[i + 1, 3]  = incCcg;
+                result[i + 1, 4]  = incAll;
+                result[i + 1, 5]  = dNet;
+                result[i + 1, 6]  = chNCcg;
+                result[i + 1, 7]  = chQCcg;
+                result[i + 1, 8]  = resCcg;
+                result[i + 1, 9]  = chNAll;
+                result[i + 1, 10] = chQAll;
+                result[i + 1, 11] = resAll;
+            }
+
+            Logger.Log($"[SumUp] {targetDate:dd/MM/yyyy}: {isinList.Count} ISIN elaborati.");
             return result;
+        }
+
+        private static void GreedyClose(List<double> ccg, List<double> other, double available,
+            out int closedN, out double closedQty, out double residuo)
+        {
+            closedN = 0; closedQty = 0;
+            foreach (var s in ccg)
+                if (available >= s) { available -= s; closedN++; closedQty += s; }
+            foreach (var s in other)
+                if (available >= s) { available -= s; closedN++; closedQty += s; }
+            double total = 0;
+            foreach (var s in ccg)   total += s;
+            foreach (var s in other) total += s;
+            residuo = total - closedQty;
         }
 
         [ExcelFunction(Name = "SiClearingGetTodayBalance", IsVolatile = true,
@@ -468,25 +584,6 @@ namespace SiClearing
             }
 
             return set.Count > 0 ? set : null;
-        }
-
-        private static Dictionary<string, double>? ParseLiveSaldi(object? arg)
-        {
-            if (arg == null || arg is ExcelMissing || arg is ExcelEmpty) return null;
-            if (!(arg is object[,] grid)) return null;
-
-            int rows = grid.GetLength(0), cols = grid.GetLength(1);
-            if (cols < 2) return null;
-
-            var map = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
-            for (int r = 0; r < rows; r++)
-            {
-                string? isinV = grid[r, 0]?.ToString()?.Trim();
-                if (string.IsNullOrEmpty(isinV)) continue;
-                if (grid[r, 1] is double qty)
-                    map[isinV!] = map.TryGetValue(isinV!, out double cur) ? cur + qty : qty;
-            }
-            return map.Count > 0 ? map : null;
         }
 
         private static bool TryParseDate(object arg, out DateTime result)
