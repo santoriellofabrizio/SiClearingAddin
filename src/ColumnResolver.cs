@@ -27,7 +27,6 @@ namespace SiClearing
             return -1;
         }
 
-        // Flatten any mix of scalar, object[], object[,] into a single list of specs.
         private IEnumerable<object> Flatten(IEnumerable<object> specs)
         {
             foreach (var s in specs)
@@ -50,12 +49,23 @@ namespace SiClearing
             }
         }
 
-        public int[] ResolveList(string[,] data, object[] specs)
+        /// <summary>
+        /// Resolves a list of column specs.
+        /// If specs is empty/missing and defaultCols is non-empty, uses defaultCols (semicolon-separated names).
+        /// Falls back to all columns only when both are empty.
+        /// </summary>
+        public int[] ResolveList(string[,] data, object[] specs, string defaultCols = "")
         {
             int colCount = data.GetLength(1);
 
-            if (specs == null || specs.Length == 0)
+            bool specsEmpty = specs == null || specs.Length == 0;
+
+            if (specsEmpty)
+            {
+                if (!string.IsNullOrWhiteSpace(defaultCols))
+                    return ResolveDefaultCols(data, defaultCols);
                 return AllColumns(colCount);
+            }
 
             var result = new List<int>();
             foreach (var spec in Flatten(specs))
@@ -69,19 +79,41 @@ namespace SiClearing
                 if (idx >= 0) result.Add(idx);
             }
 
-            return result.Count == 0 ? AllColumns(colCount) : result.ToArray();
+            if (result.Count == 0)
+            {
+                if (!string.IsNullOrWhiteSpace(defaultCols))
+                    return ResolveDefaultCols(data, defaultCols);
+                return AllColumns(colCount);
+            }
+
+            return result.ToArray();
         }
 
-        // Overload for single optional object (used by SiClearingBuyInAlert).
-        public int[] ResolveFromOptional(string[,] data, object? colsArg)
+        public int[] ResolveFromOptional(string[,] data, object? colsArg, string defaultCols = "")
         {
             if (colsArg == null
                 || colsArg is ExcelDna.Integration.ExcelMissing
                 || colsArg is ExcelDna.Integration.ExcelEmpty)
+            {
+                if (!string.IsNullOrWhiteSpace(defaultCols))
+                    return ResolveDefaultCols(data, defaultCols);
                 return AllColumns(data.GetLength(1));
+            }
 
             object[] wrapped = colsArg is object[] arr ? arr : new object[] { colsArg };
-            return ResolveList(data, wrapped);
+            return ResolveList(data, wrapped, defaultCols);
+        }
+
+        private int[] ResolveDefaultCols(string[,] data, string defaultCols)
+        {
+            var names = defaultCols.Split(';');
+            var result = new List<int>();
+            foreach (var name in names)
+            {
+                int idx = Resolve(data, name.Trim());
+                if (idx >= 0) result.Add(idx);
+            }
+            return result.Count > 0 ? result.ToArray() : AllColumns(data.GetLength(1));
         }
 
         private static int[] AllColumns(int count)

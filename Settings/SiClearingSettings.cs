@@ -12,6 +12,7 @@ namespace SiClearing.Settings
         public string SearchFolder { get; set; } = "";
         public string DefaultMarket { get; set; } = "ETFP";
         public string DefaultPortfolio { get; set; } = "ETF_EQUITY";
+        public string DefaultColumns { get; set; } = "";
 
         private static readonly string SettingsPath =
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),

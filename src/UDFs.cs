@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using ExcelDna.Integration;
+using Excel = Microsoft.Office.Interop.Excel;
 
 namespace SiClearing
 {
@@ -41,7 +42,7 @@ namespace SiClearing
             if (isinCol < 0) isinCol = Resolver.Resolve(data, "ISIN");
             if (isinCol < 0) return ExcelError.ExcelErrorValue;
 
-            int[] colIdxs = Resolver.ResolveList(data, cols);
+            int[] colIdxs = Resolver.ResolveList(data, cols, AddIn.Settings.DefaultColumns);
 
             var rows = new List<int>();
             int rowCount = data.GetLength(0);
@@ -75,7 +76,7 @@ namespace SiClearing
             if (isinCol < 0) isinCol = Resolver.Resolve(data, "ISIN");
             if (isinCol < 0) return ExcelError.ExcelErrorValue;
 
-            int[] colIdxs = Resolver.ResolveFromOptional(data, cols);
+            int[] colIdxs = Resolver.ResolveFromOptional(data, cols, AddIn.Settings.DefaultColumns);
 
             var seenIsin = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var rows = new List<int>();
@@ -100,10 +101,10 @@ namespace SiClearing
         [ExcelFunction(Name = "SiClearingBuyInSaldi",
             Description = "GroupBy ISIN delle quantità per una Buy-In Alert Date, con filtri su Tipo Conto e Controparte.")]
         public static object SiClearingBuyInSaldi(
-            [ExcelArgument(Name = "alertDate",    Description = "Data Buy-In Alert (seriale Excel o dd/mm/yyyy)")] object alertDate,
-            [ExcelArgument(Name = "saldiLive",    Description = "Range 2 colonne {ISIN, qty} con saldi live (opzionale)")] object? saldiLive = null,
-            [ExcelArgument(Name = "tipoConto",    Description = "Filtro Tipo Conto: stringa o range verticale (opzionale)")] object? tipoConto = null,
-            [ExcelArgument(Name = "controparte",  Description = "Filtro Descrizione Controparte: stringa o range verticale (opzionale)")] object? controparte = null)
+            [ExcelArgument(Name = "alertDate",   Description = "Data Buy-In Alert (seriale Excel o dd/mm/yyyy)")] object alertDate,
+            [ExcelArgument(Name = "saldiLive",   Description = "Range 2 colonne {ISIN, qty} con saldi live (opzionale)")] object? saldiLive = null,
+            [ExcelArgument(Name = "tipoConto",   Description = "Filtro Tipo Conto: stringa o range verticale (opzionale)")] object? tipoConto = null,
+            [ExcelArgument(Name = "controparte", Description = "Filtro Descrizione Controparte: stringa o range verticale (opzionale)")] object? controparte = null)
         {
             var data = AddIn.Cache.GetOrLoad(AddIn.Settings.SaveFolder);
             if (data == null || data.GetLength(0) == 0)
@@ -112,13 +113,12 @@ namespace SiClearing
             if (!TryParseDate(alertDate, out DateTime targetDate))
                 return ExcelError.ExcelErrorValue;
 
-            // resolve required columns
-            int isinCol   = ResolveFirst(data, "ISIN Code", "ISIN");
-            int buyInCol  = ResolveFirst(data, "Buy-In Alert");
-            int segnoCol  = ResolveFirst(data, "Segno");
-            int qtaCol    = ResolveFirst(data, "Quantita'");
-            int tipoCol   = ResolveFirst(data, "Tipo Conto");
-            int contrCol  = ResolveFirst(data, "Controparte");   // partial match
+            int isinCol  = ResolveFirst(data, "ISIN Code", "ISIN");
+            int buyInCol = ResolveFirst(data, "Buy-In Alert");
+            int segnoCol = ResolveFirst(data, "Segno");
+            int qtaCol   = ResolveFirst(data, "Quantita'");
+            int tipoCol  = ResolveFirst(data, "Tipo Conto");
+            int contrCol = ResolveFirst(data, "Controparte");
 
             if (isinCol < 0 || buyInCol < 0 || segnoCol < 0 || qtaCol < 0)
             {
@@ -126,11 +126,9 @@ namespace SiClearing
                 return ExcelError.ExcelErrorValue;
             }
 
-            // build filter sets
             var tipoFilter  = BuildFilterSet(tipoConto);
             var contrFilter = BuildFilterSet(controparte);
 
-            // step 1 — collect ISINs with matching Buy-In Alert date
             var targetIsins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             int rowCount = data.GetLength(0);
 
@@ -149,7 +147,6 @@ namespace SiClearing
                 return ExcelError.ExcelErrorNA;
             }
 
-            // step 2 — filter rows + groupby ISIN (sum signed qty)
             var saldoCsv = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
 
             for (int r = 1; r < rowCount; r++)
@@ -175,23 +172,17 @@ namespace SiClearing
                 string segno = data[r, segnoCol].Trim().ToUpperInvariant();
                 double signed = segno == "A" ? qty : -qty;
 
-                if (!saldoCsv.TryGetValue(isin, out double cur))
-                    saldoCsv[isin] = signed;
-                else
-                    saldoCsv[isin] = cur + signed;
+                saldoCsv[isin] = saldoCsv.TryGetValue(isin, out double cur) ? cur + signed : signed;
             }
 
             if (saldoCsv.Count == 0)
                 return ExcelError.ExcelErrorNA;
 
-            // step 3 — parse live balances if provided
             var livemap = ParseLiveSaldi(saldiLive);
-
             bool hasLive = livemap != null;
 
-            // build output
-            int cols = hasLive ? 4 : 2;
-            var result = new object[saldoCsv.Count + 1, cols];
+            int outCols = hasLive ? 4 : 2;
+            var result = new object[saldoCsv.Count + 1, outCols];
             result[0, 0] = "ISIN";
             result[0, 1] = "Saldo CSV";
             if (hasLive) { result[0, 2] = "Saldo Live"; result[0, 3] = "Saldo Totale"; }
@@ -199,10 +190,10 @@ namespace SiClearing
             int idx = 1;
             foreach (var kv in saldoCsv)
             {
-                double live = (hasLive && livemap!.TryGetValue(kv.Key, out double lv)) ? lv : 0;
+                double lv = (hasLive && livemap!.TryGetValue(kv.Key, out double lvv)) ? lvv : 0;
                 result[idx, 0] = kv.Key;
                 result[idx, 1] = kv.Value;
-                if (hasLive) { result[idx, 2] = live; result[idx, 3] = kv.Value + live; }
+                if (hasLive) { result[idx, 2] = lv; result[idx, 3] = kv.Value + lv; }
                 idx++;
             }
 
@@ -210,7 +201,145 @@ namespace SiClearing
             return result;
         }
 
+        [ExcelFunction(Name = "SiClearingGetTodayBalance", IsVolatile = true,
+            Description = "Saldo live per ISIN da dumaGetTableRecords su uno o più mercati (Buy-Sell qty).")]
+        public static object SiClearingGetTodayBalance(
+            [ExcelArgument(Name = "markets", Description = "Stringa o range verticale di market ID")] object markets,
+            [ExcelArgument(Name = "isin",    Description = "ISIN specifico → scalare; omesso → array ISIN/Saldo")] object? isin = null)
+        {
+            var marketList = ExtractStringList(markets);
+            if (marketList.Count == 0)
+                return ExcelError.ExcelErrorValue;
+
+            var balance = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+
+            var xl = ExcelDnaUtil.Application as Excel.Application;
+            if (xl == null) return ExcelError.ExcelErrorValue;
+
+            foreach (var market in marketList)
+            {
+                object raw;
+                try
+                {
+                    raw = xl.Evaluate($"dumaGetTableRecords(\"Trade\",\"{market}\",TRUE)");
+                }
+                catch (Exception ex)
+                {
+                    Logger.Log($"[GetTodayBalance] Duma non disponibile per mercato {market} — assicurarsi che Duma sia avviato e connesso. ({ex.Message})");
+                    continue;
+                }
+
+                if (!(raw is object[,] table))
+                {
+                    Logger.Log($"[GetTodayBalance] Duma non disponibile per mercato {market} — assicurarsi che Duma sia avviato e connesso.");
+                    continue;
+                }
+
+                int rowCount = table.GetLength(0);
+                int colCount = table.GetLength(1);
+
+                if (rowCount < 2)
+                {
+                    Logger.Log($"[GetTodayBalance] Mercato {market}: nessun trade ricevuto.");
+                    continue;
+                }
+
+                // find column indices from header row (row 0)
+                int colIsin = -1, colQty = -1, colSide = -1;
+                for (int c = 0; c < colCount; c++)
+                {
+                    string hdr = table[0, c]?.ToString() ?? "";
+                    if (hdr.Equals("instrument.isincode", StringComparison.OrdinalIgnoreCase)) colIsin = c;
+                    else if (hdr.Equals("tradeqty", StringComparison.OrdinalIgnoreCase)) colQty = c;
+                    else if (hdr.Equals("side", StringComparison.OrdinalIgnoreCase)) colSide = c;
+                }
+
+                if (colIsin < 0 || colQty < 0 || colSide < 0)
+                {
+                    Logger.Log($"[GetTodayBalance] Mercato {market}: colonne instrument.isincode/tradeqty/side non trovate nell'header Duma.");
+                    continue;
+                }
+
+                int tradeCount = 0;
+                for (int r = 1; r < rowCount; r++)
+                {
+                    string isinVal = table[r, colIsin]?.ToString()?.Trim() ?? "";
+                    string sideVal = table[r, colSide]?.ToString()?.Trim() ?? "";
+                    if (string.IsNullOrEmpty(isinVal)) continue;
+
+                    double qty;
+                    var qtyRaw = table[r, colQty];
+                    if (qtyRaw is double qd) qty = qd;
+                    else if (!double.TryParse(qtyRaw?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out qty)) continue;
+
+                    double signed = sideVal.Equals("Buy", StringComparison.OrdinalIgnoreCase) ? qty : -qty;
+                    balance[isinVal] = balance.TryGetValue(isinVal, out double cur) ? cur + signed : signed;
+                    tradeCount++;
+                }
+
+                Logger.Log($"[GetTodayBalance] Mercato {market}: {tradeCount} trade ricevuti.");
+            }
+
+            if (balance.Count == 0)
+                return ExcelError.ExcelErrorNA;
+
+            Logger.Log($"[GetTodayBalance] Totale ISIN: {balance.Count}");
+
+            // single ISIN → scalar
+            string? isinFilter = null;
+            if (isin != null && !(isin is ExcelMissing) && !(isin is ExcelEmpty))
+                isinFilter = isin.ToString()?.Trim();
+
+            if (!string.IsNullOrEmpty(isinFilter))
+                return balance.TryGetValue(isinFilter!, out double v) ? (object)v : 0.0;
+
+            // all ISINs → array
+            var result = new object[balance.Count + 1, 2];
+            result[0, 0] = "ISIN";
+            result[0, 1] = "Saldo";
+            int idx = 1;
+            foreach (var kv in balance)
+            {
+                result[idx, 0] = kv.Key;
+                result[idx, 1] = kv.Value;
+                idx++;
+            }
+            return result;
+        }
+
         // ── helpers ──────────────────────────────────────────────────────────
+
+        private static List<string> ExtractStringList(object arg)
+        {
+            var list = new List<string>();
+            if (arg == null || arg is ExcelMissing || arg is ExcelEmpty) return list;
+
+            if (arg is object[,] grid)
+            {
+                int rows = grid.GetLength(0), cols = grid.GetLength(1);
+                for (int r = 0; r < rows; r++)
+                    for (int c = 0; c < cols; c++)
+                    {
+                        var v = grid[r, c]?.ToString()?.Trim();
+                        if (!string.IsNullOrEmpty(v)) list.Add(v!);
+                    }
+            }
+            else if (arg is object[] arr)
+            {
+                foreach (var item in arr)
+                {
+                    var v = item?.ToString()?.Trim();
+                    if (!string.IsNullOrEmpty(v)) list.Add(v!);
+                }
+            }
+            else
+            {
+                var v = arg.ToString()?.Trim();
+                if (!string.IsNullOrEmpty(v)) list.Add(v!);
+            }
+
+            return list;
+        }
 
         private static int ResolveFirst(string[,] data, params string[] names)
         {
@@ -222,10 +351,6 @@ namespace SiClearing
             return -1;
         }
 
-        /// <summary>
-        /// Builds a case-insensitive set of allowed values from a scalar or Excel range.
-        /// Returns null if the argument is missing/empty (= no filter).
-        /// </summary>
         private static HashSet<string>? BuildFilterSet(object? arg)
         {
             if (arg == null || arg is ExcelMissing || arg is ExcelEmpty)
@@ -260,15 +385,9 @@ namespace SiClearing
             return set.Count > 0 ? set : null;
         }
 
-        /// <summary>
-        /// Parses a 2-column range {ISIN, qty} into a dictionary.
-        /// Returns null if arg is missing.
-        /// </summary>
         private static Dictionary<string, double>? ParseLiveSaldi(object? arg)
         {
-            if (arg == null || arg is ExcelMissing || arg is ExcelEmpty)
-                return null;
-
+            if (arg == null || arg is ExcelMissing || arg is ExcelEmpty) return null;
             if (!(arg is object[,] grid)) return null;
 
             int rows = grid.GetLength(0), cols = grid.GetLength(1);
@@ -277,24 +396,18 @@ namespace SiClearing
             var map = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
             for (int r = 0; r < rows; r++)
             {
-                string? isin = grid[r, 0]?.ToString()?.Trim();
-                if (string.IsNullOrEmpty(isin)) continue;
+                string? isinV = grid[r, 0]?.ToString()?.Trim();
+                if (string.IsNullOrEmpty(isinV)) continue;
                 if (grid[r, 1] is double qty)
-                    map[isin!] = map.TryGetValue(isin!, out double cur) ? cur + qty : qty;
+                    map[isinV!] = map.TryGetValue(isinV!, out double cur) ? cur + qty : qty;
             }
             return map.Count > 0 ? map : null;
         }
 
         private static bool TryParseDate(object arg, out DateTime result)
         {
-            if (arg is double serial)
-            {
-                result = DateTime.FromOADate(serial).Date;
-                return true;
-            }
-            if (arg is string s)
-                return TryParseDateString(s, out result);
-
+            if (arg is double serial) { result = DateTime.FromOADate(serial).Date; return true; }
+            if (arg is string s) return TryParseDateString(s, out result);
             result = default;
             return false;
         }

@@ -33,7 +33,8 @@ namespace SiClearing
                     Logger.Log($"Righe in cache: {(AddIn.Cache.Data?.GetLength(0) ?? 0) - 1}");
                     MessageBox.Show($"CSV scaricato e caricato:\n{path}",
                         "SiClearing", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    ExcelDna.Integration.XlCall.Excel(ExcelDna.Integration.XlCall.xlcCalculateNow);
+                    ExcelDna.Integration.ExcelAsyncUtil.QueueAsMacro(() =>
+                        ExcelDna.Integration.XlCall.Excel(ExcelDna.Integration.XlCall.xlcCalculateNow));
                 }
                 else
                 {
