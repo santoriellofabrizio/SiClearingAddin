@@ -76,8 +76,10 @@ namespace SiClearing
         [ExcelFunction(Name = "SiClearingGetISIN",
             Description = "Restituisce righe del CSV per il codice ISIN specificato.")]
         public static object SiClearingGetISIN(
-            [ExcelArgument(Name = "isin", Description = "Codice ISIN da cercare")] string isin,
-            [ExcelArgument(Name = "cols", Description = "Nomi colonna o indici 1-based (opzionale)")] params object[] cols)
+            [ExcelArgument(Name = "isin",      Description = "Codice ISIN da cercare")] string isin,
+            [ExcelArgument(Name = "cols",      Description = "Colonne da restituire: nomi o indici 1-based (opzionale)")] object? cols = null,
+            [ExcelArgument(Name = "tipoConto", Description = "Filtro Tipo Conto: stringa o range (opzionale)")] object? tipoConto = null,
+            [ExcelArgument(Name = "mercato",   Description = "Filtro Mercato: stringa o range (opzionale)")] object? mercato = null)
         {
             var data = AddIn.Cache.GetOrLoad(AddIn.Settings.SaveFolder);
             if (data == null || data.GetLength(0) == 0)
@@ -87,17 +89,25 @@ namespace SiClearing
             if (isinCol < 0) isinCol = Resolver.Resolve(data, "ISIN");
             if (isinCol < 0) return ExcelError.ExcelErrorValue;
 
-            int[] colIdxs = Resolver.ResolveList(data, cols, AddIn.Settings.DefaultColumns);
+            int[] colIdxs = Resolver.ResolveFromOptional(data, cols, AddIn.Settings.DefaultColumns);
             var gf = BuildGlobalFilter(data);
+            var tipoFilter = BuildFilterSet(tipoConto);
+            var mercatoFilter = BuildFilterSet(mercato);
+            int tipoCol = Resolver.Resolve(data, "Tipo Conto");
+            int mercatoCol = Resolver.Resolve(data, "Mercato");
 
             var rows = new List<int>();
             int rowCount = data.GetLength(0);
             for (int r = 1; r < rowCount; r++)
-                if (data[r, isinCol].Equals(isin.Trim(), StringComparison.OrdinalIgnoreCase) && gf.Pass(data, r))
-                    rows.Add(r);
+            {
+                if (!data[r, isinCol].Equals(isin.Trim(), StringComparison.OrdinalIgnoreCase)) continue;
+                if (!gf.Pass(data, r)) continue;
+                if (tipoFilter != null && tipoCol >= 0 && !tipoFilter.Contains(data[r, tipoCol].Trim())) continue;
+                if (mercatoFilter != null && mercatoCol >= 0 && !mercatoFilter.Contains(data[r, mercatoCol].Trim())) continue;
+                rows.Add(r);
+            }
 
             if (rows.Count == 0) return ExcelError.ExcelErrorNA;
-
             return BuildResult(data, rows, colIdxs);
         }
 
@@ -105,14 +115,16 @@ namespace SiClearing
             Description = "Restituisce ISIN con Buy-In Alert Date uguale alla data specificata.")]
         public static object SiClearingBuyInAlert(
             [ExcelArgument(Name = "alertDate", Description = "Data alert (numero seriale Excel o dd/mm/yyyy)")] object alertDate,
-            [ExcelArgument(Name = "cols", Description = "Nomi colonna o indici (opzionale)")] object? cols = null)
+            [ExcelArgument(Name = "cols",      Description = "Colonne da restituire (opzionale)")] object? cols = null,
+            [ExcelArgument(Name = "isin",      Description = "Filtro ISIN: stringa o range (opzionale)")] object? isin = null,
+            [ExcelArgument(Name = "tipoConto", Description = "Filtro Tipo Conto: stringa o range (opzionale)")] object? tipoConto = null,
+            [ExcelArgument(Name = "mercato",   Description = "Filtro Mercato: stringa o range (opzionale)")] object? mercato = null)
         {
             var data = AddIn.Cache.GetOrLoad(AddIn.Settings.SaveFolder);
             if (data == null || data.GetLength(0) == 0)
                 return ExcelError.ExcelErrorNA;
 
-            DateTime targetDate;
-            if (!TryParseDate(alertDate, out targetDate))
+            if (!TryParseDate(alertDate, out DateTime targetDate))
                 return ExcelError.ExcelErrorValue;
 
             int buyInCol = Resolver.Resolve(data, "Buy-In Alert");
@@ -124,6 +136,11 @@ namespace SiClearing
 
             int[] colIdxs = Resolver.ResolveFromOptional(data, cols, AddIn.Settings.DefaultColumns);
             var gf = BuildGlobalFilter(data);
+            var isinFilter  = BuildFilterSet(isin);
+            var tipoFilter  = BuildFilterSet(tipoConto);
+            var mercatoFilter = BuildFilterSet(mercato);
+            int tipoCol    = Resolver.Resolve(data, "Tipo Conto");
+            int mercatoCol = Resolver.Resolve(data, "Mercato");
 
             var seenIsin = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var rows = new List<int>();
@@ -137,8 +154,12 @@ namespace SiClearing
                 if (!TryParseDateString(raw, out DateTime dt)) continue;
                 if (dt.Date != targetDate) continue;
 
-                string isin = data[r, isinCol];
-                if (!seenIsin.Add(isin)) continue;
+                string isinVal = data[r, isinCol].Trim();
+                if (isinFilter != null && !isinFilter.Contains(isinVal)) continue;
+                if (tipoFilter != null && tipoCol >= 0 && !tipoFilter.Contains(data[r, tipoCol].Trim())) continue;
+                if (mercatoFilter != null && mercatoCol >= 0 && !mercatoFilter.Contains(data[r, mercatoCol].Trim())) continue;
+
+                if (!seenIsin.Add(isinVal)) continue;
                 rows.Add(r);
             }
 
@@ -147,12 +168,14 @@ namespace SiClearing
         }
 
         [ExcelFunction(Name = "SiClearingBuyInSaldi",
-            Description = "GroupBy ISIN delle quantità per una Buy-In Alert Date, con filtri su Tipo Conto e Controparte.")]
+            Description = "GroupBy ISIN delle quantità per una Buy-In Alert Date, con filtri su Tipo Conto, Controparte, Mercato e ISIN.")]
         public static object SiClearingBuyInSaldi(
             [ExcelArgument(Name = "alertDate",   Description = "Data Buy-In Alert (seriale Excel o dd/mm/yyyy)")] object alertDate,
             [ExcelArgument(Name = "saldiLive",   Description = "Range 2 colonne {ISIN, qty} con saldi live (opzionale)")] object? saldiLive = null,
-            [ExcelArgument(Name = "tipoConto",   Description = "Filtro Tipo Conto: stringa o range verticale (opzionale)")] object? tipoConto = null,
-            [ExcelArgument(Name = "controparte", Description = "Filtro Descrizione Controparte: stringa o range verticale (opzionale)")] object? controparte = null)
+            [ExcelArgument(Name = "tipoConto",   Description = "Filtro Tipo Conto: stringa o range (opzionale)")] object? tipoConto = null,
+            [ExcelArgument(Name = "controparte", Description = "Filtro Controparte: stringa o range (opzionale)")] object? controparte = null,
+            [ExcelArgument(Name = "mercato",     Description = "Filtro Mercato: stringa o range (opzionale)")] object? mercato = null,
+            [ExcelArgument(Name = "isin",        Description = "Filtro ISIN: stringa o range (opzionale)")] object? isin = null)
         {
             var data = AddIn.Cache.GetOrLoad(AddIn.Settings.SaveFolder);
             if (data == null || data.GetLength(0) == 0)
@@ -174,9 +197,12 @@ namespace SiClearing
                 return ExcelError.ExcelErrorValue;
             }
 
-            var tipoFilter  = BuildFilterSet(tipoConto);
-            var contrFilter = BuildFilterSet(controparte);
+            var tipoFilter    = BuildFilterSet(tipoConto);
+            var contrFilter   = BuildFilterSet(controparte);
+            var mercatoFilter = BuildFilterSet(mercato);
+            var isinFilter    = BuildFilterSet(isin);
             var gf = BuildGlobalFilter(data);
+            int mercatoCol = ResolveFirst(data, "Mercato");
 
             var targetIsins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             int rowCount = data.GetLength(0);
@@ -188,7 +214,9 @@ namespace SiClearing
                 if (raw == "--" || string.IsNullOrEmpty(raw)) continue;
                 if (!TryParseDateString(raw, out DateTime dt)) continue;
                 if (dt.Date != targetDate) continue;
-                targetIsins.Add(data[r, isinCol].Trim());
+                string isinVal = data[r, isinCol].Trim();
+                if (isinFilter != null && !isinFilter.Contains(isinVal)) continue;
+                targetIsins.Add(isinVal);
             }
 
             if (targetIsins.Count == 0)
@@ -211,6 +239,10 @@ namespace SiClearing
 
                 if (contrFilter != null && contrCol >= 0 &&
                     !contrFilter.Contains(data[r, contrCol].Trim()))
+                    continue;
+
+                if (mercatoFilter != null && mercatoCol >= 0 &&
+                    !mercatoFilter.Contains(data[r, mercatoCol].Trim()))
                     continue;
 
                 string qtaRaw = data[r, qtaCol].Trim();
