@@ -326,24 +326,13 @@ namespace SiClearing
                 Logger.Log("[SumUp] Impossibile accedere a Excel — Duma non interrogato.");
             }
 
-            // build output: 1 row per ISIN, 12 columns
-            // ISIN | ScopertiN | ScopertiQty | IncomingCCG | IncomingTutteCP | DumaNet
-            // | ChiusiCCGN | ChiusiCCGQty | ResiduoCCG | ChiusiTutteN | ChiusiTutteQty | ResiduoTutte
+            // output: ISIN | Residuo CCG | Residuo Tutte CP
             var isinList = new List<string>(targetIsins);
             isinList.Sort(StringComparer.OrdinalIgnoreCase);
-            var result = new object[isinList.Count + 1, 12];
-            result[0, 0]  = "ISIN";
-            result[0, 1]  = "Scoperti N";
-            result[0, 2]  = "Scoperti Qty";
-            result[0, 3]  = "Incoming CCG";
-            result[0, 4]  = "Incoming Tutte CP";
-            result[0, 5]  = "Duma Net";
-            result[0, 6]  = "Chiusi CCG N";
-            result[0, 7]  = "Chiusi CCG Qty";
-            result[0, 8]  = "Residuo CCG";
-            result[0, 9]  = "Chiusi Tutte N";
-            result[0, 10] = "Chiusi Tutte Qty";
-            result[0, 11] = "Residuo Tutte";
+            var result = new object[isinList.Count + 1, 3];
+            result[0, 0] = "ISIN";
+            result[0, 1] = "Residuo CCG";
+            result[0, 2] = "Residuo Tutte CP";
 
             for (int i = 0; i < isinList.Count; i++)
             {
@@ -352,34 +341,19 @@ namespace SiClearing
                 var otherList = scopertiOther[key];
                 ccgList.Sort();
                 otherList.Sort();
-                int scopertiN   = ccgList.Count + otherList.Count;
-                double scopertiQ = 0;
-                foreach (var v in ccgList)   scopertiQ += v;
-                foreach (var v in otherList) scopertiQ += v;
 
                 double dNet = dumaNet.TryGetValue(key, out double dn) ? dn : 0.0;
                 incomingCcg.TryGetValue(key, out double incCcg);
                 incomingAll.TryGetValue(key, out double incAll);
-                double avCcg  = incCcg + Math.Max(0, dNet);
-                double avAll  = incAll  + Math.Max(0, dNet);
 
-                GreedyClose(ccgList, otherList, avCcg,
-                    out int chNCcg, out double chQCcg, out double resCcg);
-                GreedyClose(ccgList, otherList, avAll,
-                    out int chNAll, out double chQAll, out double resAll);
+                GreedyClose(ccgList, otherList, incCcg + Math.Max(0, dNet),
+                    out _, out _, out double resCcg);
+                GreedyClose(ccgList, otherList, incAll + Math.Max(0, dNet),
+                    out _, out _, out double resAll);
 
-                result[i + 1, 0]  = key;
-                result[i + 1, 1]  = scopertiN;
-                result[i + 1, 2]  = scopertiQ;
-                result[i + 1, 3]  = incCcg;
-                result[i + 1, 4]  = incAll;
-                result[i + 1, 5]  = dNet;
-                result[i + 1, 6]  = chNCcg;
-                result[i + 1, 7]  = chQCcg;
-                result[i + 1, 8]  = resCcg;
-                result[i + 1, 9]  = chNAll;
-                result[i + 1, 10] = chQAll;
-                result[i + 1, 11] = resAll;
+                result[i + 1, 0] = key;
+                result[i + 1, 1] = resCcg;
+                result[i + 1, 2] = resAll;
             }
 
             Logger.Log($"[SumUp] {targetDate:dd/MM/yyyy}: {isinList.Count} ISIN elaborati.");
