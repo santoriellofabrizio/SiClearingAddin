@@ -37,6 +37,15 @@ namespace SiClearing
             finally { _lock.ExitWriteLock(); }
         }
 
+        public void LoadFile(string path)
+        {
+            if (!File.Exists(path)) return;
+            var loaded = ParseCsv(path);
+            _lock.EnterWriteLock();
+            try { _data = loaded; }
+            finally { _lock.ExitWriteLock(); }
+        }
+
         public void LoadLatest(string saveFolder)
         {
             if (!Directory.Exists(saveFolder))

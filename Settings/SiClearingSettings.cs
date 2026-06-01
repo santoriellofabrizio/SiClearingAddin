@@ -13,6 +13,9 @@ namespace SiClearing.Settings
         public string DefaultMarket { get; set; } = "ETFP";
         public string DefaultPortfolio { get; set; } = "ETF_EQUITY";
         public string DefaultColumns { get; set; } = "";
+        // Filtri globali applicati a tutte le UDF (valori separati da ;, vuoto = nessun filtro)
+        public string MercatoFilter { get; set; } = "";
+        public string TipoContoFilter { get; set; } = "";
 
         private static readonly string SettingsPath =
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),

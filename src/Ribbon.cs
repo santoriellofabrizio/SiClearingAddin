@@ -28,7 +28,7 @@ namespace SiClearing
                 if (path != null)
                 {
                     AddIn.Cache.Invalidate();
-                    AddIn.Cache.LoadLatest(AddIn.Settings.SaveFolder);
+                    AddIn.Cache.LoadFile(path);
                     Logger.Log($"CSV caricato: {path}");
                     Logger.Log($"Righe in cache: {(AddIn.Cache.Data?.GetLength(0) ?? 0) - 1}");
                     MessageBox.Show($"CSV scaricato e caricato:\n{path}",

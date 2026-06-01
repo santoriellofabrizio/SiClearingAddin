@@ -12,6 +12,8 @@ namespace SiClearing
         private readonly TextBox _txtMarket = new TextBox();
         private readonly TextBox _txtPortfolio = new TextBox();
         private readonly TextBox _txtDefaultColumns = new TextBox();
+        private readonly TextBox _txtMercatoFilter = new TextBox();
+        private readonly TextBox _txtTipoContoFilter = new TextBox();
         private readonly SiClearingSettings _settings;
 
         public SettingsForm(SiClearingSettings settings)
@@ -44,6 +46,8 @@ namespace SiClearing
             AddRow(layout, "Mercato default:", _txtMarket, settings.DefaultMarket, null);
             AddRow(layout, "Portfolio default:", _txtPortfolio, settings.DefaultPortfolio, null);
             AddRow(layout, "Colonne default (sep. ;):", _txtDefaultColumns, settings.DefaultColumns, null);
+            AddRow(layout, "Filtro Mercato (sep. ;):", _txtMercatoFilter, settings.MercatoFilter, null);
+            AddRow(layout, "Filtro Tipo Conto (sep. ;):", _txtTipoContoFilter, settings.TipoContoFilter, null);
 
             var btnOk = new Button { Text = "OK", DialogResult = DialogResult.OK, Width = 80 };
             var btnCancel = new Button { Text = "Annulla", DialogResult = DialogResult.Cancel, Width = 80 };
@@ -102,6 +106,8 @@ namespace SiClearing
             _settings.DefaultMarket = _txtMarket.Text;
             _settings.DefaultPortfolio = _txtPortfolio.Text;
             _settings.DefaultColumns = _txtDefaultColumns.Text;
+            _settings.MercatoFilter = _txtMercatoFilter.Text;
+            _settings.TipoContoFilter = _txtTipoContoFilter.Text;
             _settings.Save();
 
             if (folderChanged)

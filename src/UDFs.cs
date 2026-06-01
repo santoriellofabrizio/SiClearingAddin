@@ -10,6 +10,51 @@ namespace SiClearing
     {
         private static readonly ColumnResolver Resolver = new ColumnResolver();
 
+        // ── global filter state (resolved once per UDF call) ─────────────────
+
+        private struct GlobalFilter
+        {
+            public int MercatoCol;
+            public int TipoContoCol;
+            public HashSet<string>? Mercati;
+            public HashSet<string>? TipiConto;
+
+            public bool Pass(string[,] data, int row)
+            {
+                if (Mercati != null && MercatoCol >= 0 &&
+                    !Mercati.Contains(data[row, MercatoCol].Trim()))
+                    return false;
+                if (TipiConto != null && TipoContoCol >= 0 &&
+                    !TipiConto.Contains(data[row, TipoContoCol].Trim()))
+                    return false;
+                return true;
+            }
+        }
+
+        private static GlobalFilter BuildGlobalFilter(string[,] data)
+        {
+            var f = new GlobalFilter
+            {
+                MercatoCol   = Resolver.Resolve(data, "Mercato"),
+                TipoContoCol = Resolver.Resolve(data, "Tipo Conto"),
+                Mercati      = ParseFilterSetting(AddIn.Settings.MercatoFilter),
+                TipiConto    = ParseFilterSetting(AddIn.Settings.TipoContoFilter),
+            };
+            return f;
+        }
+
+        private static HashSet<string>? ParseFilterSetting(string setting)
+        {
+            if (string.IsNullOrWhiteSpace(setting)) return null;
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var v in setting.Split(';'))
+            {
+                var t = v.Trim();
+                if (!string.IsNullOrEmpty(t)) set.Add(t);
+            }
+            return set.Count > 0 ? set : null;
+        }
+
         [ExcelFunction(Name = "SiClearingHeaders",
             Description = "Restituisce indice e nome di ogni colonna del CSV SiClearing.")]
         public static object SiClearingHeaders()
@@ -43,11 +88,12 @@ namespace SiClearing
             if (isinCol < 0) return ExcelError.ExcelErrorValue;
 
             int[] colIdxs = Resolver.ResolveList(data, cols, AddIn.Settings.DefaultColumns);
+            var gf = BuildGlobalFilter(data);
 
             var rows = new List<int>();
             int rowCount = data.GetLength(0);
             for (int r = 1; r < rowCount; r++)
-                if (data[r, isinCol].Equals(isin.Trim(), StringComparison.OrdinalIgnoreCase))
+                if (data[r, isinCol].Equals(isin.Trim(), StringComparison.OrdinalIgnoreCase) && gf.Pass(data, r))
                     rows.Add(r);
 
             if (rows.Count == 0) return ExcelError.ExcelErrorNA;
@@ -77,6 +123,7 @@ namespace SiClearing
             if (isinCol < 0) return ExcelError.ExcelErrorValue;
 
             int[] colIdxs = Resolver.ResolveFromOptional(data, cols, AddIn.Settings.DefaultColumns);
+            var gf = BuildGlobalFilter(data);
 
             var seenIsin = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var rows = new List<int>();
@@ -84,6 +131,7 @@ namespace SiClearing
 
             for (int r = 1; r < rowCount; r++)
             {
+                if (!gf.Pass(data, r)) continue;
                 string raw = data[r, buyInCol].Trim();
                 if (raw == "--" || string.IsNullOrEmpty(raw)) continue;
                 if (!TryParseDateString(raw, out DateTime dt)) continue;
@@ -128,12 +176,14 @@ namespace SiClearing
 
             var tipoFilter  = BuildFilterSet(tipoConto);
             var contrFilter = BuildFilterSet(controparte);
+            var gf = BuildGlobalFilter(data);
 
             var targetIsins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             int rowCount = data.GetLength(0);
 
             for (int r = 1; r < rowCount; r++)
             {
+                if (!gf.Pass(data, r)) continue;
                 string raw = data[r, buyInCol].Trim();
                 if (raw == "--" || string.IsNullOrEmpty(raw)) continue;
                 if (!TryParseDateString(raw, out DateTime dt)) continue;
@@ -151,6 +201,7 @@ namespace SiClearing
 
             for (int r = 1; r < rowCount; r++)
             {
+                if (!gf.Pass(data, r)) continue;
                 string isin = data[r, isinCol].Trim();
                 if (!targetIsins.Contains(isin)) continue;
 
