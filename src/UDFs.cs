@@ -167,7 +167,7 @@ namespace SiClearing
             return BuildResult(data, rows, colIdxs);
         }
 
-        [ExcelFunction(Name = "SiClearingSumUp", IsVolatile = true,
+        [ExcelFunction(Name = "SiClearingSumUp",
             Description = "Greedy settlement: quanti scoperti si chiudono e quante shares mancano.")]
         public static object SiClearingSumUp(
             [ExcelArgument(Name = "alertDate", Description = "Data buy-in alert (seriale Excel o dd/MM/yyyy)")] object alertDate,
@@ -374,7 +374,7 @@ namespace SiClearing
             residuo = total - closedQty;
         }
 
-        [ExcelFunction(Name = "SiClearingGetTodayBalance", IsVolatile = true,
+        [ExcelFunction(Name = "SiClearingGetTodayBalance",
             Description = "Saldo live per ISIN da dumaGetTableRecords su uno o più mercati (Buy-Sell qty).")]
         public static object SiClearingGetTodayBalance(
             [ExcelArgument(Name = "markets", Description = "Stringa o range verticale di market ID")] object markets,
