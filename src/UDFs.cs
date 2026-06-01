@@ -235,8 +235,10 @@ namespace SiClearing
                     continue;
                 }
 
-                int rowCount = table.GetLength(0);
-                int colCount = table.GetLength(1);
+                // COM arrays from Application.Evaluate can be 1-based — use GetLowerBound/GetUpperBound
+                int r0 = table.GetLowerBound(0), c0 = table.GetLowerBound(1);
+                int rowCount = table.GetUpperBound(0) - r0 + 1;
+                int colCount = table.GetUpperBound(1) - c0 + 1;
 
                 if (rowCount < 2)
                 {
@@ -244,11 +246,11 @@ namespace SiClearing
                     continue;
                 }
 
-                // find column indices from header row (row 0)
+                // find column indices from header row
                 int colIsin = -1, colQty = -1, colSide = -1;
                 for (int c = 0; c < colCount; c++)
                 {
-                    string hdr = table[0, c]?.ToString() ?? "";
+                    string hdr = table[r0, c0 + c]?.ToString() ?? "";
                     if (hdr.Equals("instrument.isincode", StringComparison.OrdinalIgnoreCase)) colIsin = c;
                     else if (hdr.Equals("tradeqty", StringComparison.OrdinalIgnoreCase)) colQty = c;
                     else if (hdr.Equals("side", StringComparison.OrdinalIgnoreCase)) colSide = c;
@@ -263,12 +265,12 @@ namespace SiClearing
                 int tradeCount = 0;
                 for (int r = 1; r < rowCount; r++)
                 {
-                    string isinVal = table[r, colIsin]?.ToString()?.Trim() ?? "";
-                    string sideVal = table[r, colSide]?.ToString()?.Trim() ?? "";
+                    string isinVal = table[r0 + r, c0 + colIsin]?.ToString()?.Trim() ?? "";
+                    string sideVal = table[r0 + r, c0 + colSide]?.ToString()?.Trim() ?? "";
                     if (string.IsNullOrEmpty(isinVal)) continue;
 
                     double qty;
-                    var qtyRaw = table[r, colQty];
+                    var qtyRaw = table[r0 + r, c0 + colQty];
                     if (qtyRaw is double qd) qty = qd;
                     else if (!double.TryParse(qtyRaw?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out qty)) continue;
 
