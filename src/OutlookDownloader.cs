@@ -89,8 +89,10 @@ namespace SiClearing
 
         private Outlook.MailItem? SearchFolderRestrict(Outlook.MAPIFolder folder, SiClearingSettings settings)
         {
-            string filter = $"[ReceivedTime] >= '{DateTime.Today:MM/dd/yyyy} 00:00 AM' " +
-                            $"AND [ReceivedTime] <= '{DateTime.Today:MM/dd/yyyy} 11:59 PM'";
+            // DASL SQL format with ISO dates — locale-independent
+            string today = DateTime.Today.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+            string filter = $"@SQL=\"urn:schemas:httpmail:datereceived\" >= '{today} 00:00:00'" +
+                            $" AND \"urn:schemas:httpmail:datereceived\" <= '{today} 23:59:59'";
 
             var items = (Outlook.Items)folder.Items.Restrict(filter);
             items.Sort("[ReceivedTime]", true);
