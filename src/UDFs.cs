@@ -579,8 +579,17 @@ namespace SiClearing
                 result[0, c] = data[0, colIdxs[c]];
             for (int r = 0; r < rows.Count; r++)
                 for (int c = 0; c < colIdxs.Length; c++)
-                    result[r + 1, c] = data[rows[r], colIdxs[c]];
+                    result[r + 1, c] = CoerceCell(data[rows[r], colIdxs[c]]);
             return result;
+        }
+
+        private static object CoerceCell(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return s;
+            // leave dates as text
+            if (s.Length == 10 && s[2] == '/' && s[5] == '/') return s;
+            try { return CsvCache.ParseItalianNumber(s); }
+            catch { return s; }
         }
     }
 }
